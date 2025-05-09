@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>GPS Tracker Map</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    #map { height: 60vh; }
+    .charts { display: flex; flex-wrap: wrap; gap: 20px; padding: 10px; background: #f4f4f4; }
+    .chart-container { flex: 1 1 300px; }
+    canvas { background: #fff; border: 1px solid #ccc; height: 200px !important; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="charts">
+    <div class="chart-container"><h4>Suhu</h4><canvas id="tempChart"></canvas></div>
+    <div class="chart-container"><h4>Kelembaban</h4><canvas id="humChart"></canvas></div>
+    <div class="chart-container"><h4>Accel X/Y/Z</h4><canvas id="accChart"></canvas></div>
+    <div class="chart-container"><h4>Gyro X/Y/Z</h4><canvas id="gyroChart"></canvas></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAppDzGPUl44D-_uSSEwMh7Xb1wrp1L3wI",
+      authDomain: "gpstrack-aa130.firebaseapp.com",
+      databaseURL: "https://gpstrack-aa130-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "gpstrack-aa130",
+      storageBucket: "gpstrack-aa130.appspot.com",
+      messagingSenderId: "375847050090",
+      appId: "1:375847050090:web:f4c1b0b182ff6a6512a313"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const map = L.map('map').setView([-7.5, 110.0], 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    const markers = [];
+    const pathCoordinates = [];
+    const polyline = L.polyline([], { color: 'red' }).addTo(map);
+
+    const createChart = (ctx, labels, colors) => {
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: labels.map((label, i) => ({
+            label: label,
+            data: [],
+            borderColor: colors[i],
+            backgroundColor: colors[i],
+            fill: false,
+            tension: 0.4,
+            pointRadius: 0,
+            cubicInterpolationMode: 'monotone',
+            borderWidth: 2,
+          }))
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { display: false },
+            y: { beginAtZero: false }
+          },
+          animation: { duration: 300 },
+          plugins: {
+            legend: {
+              labels: {
+                usePointStyle: true,
+                boxWidth: 10
+              }
+            }
+          }
+        }
+      });
+    };
+
+    const tempChart = createChart(document.getElementById('tempChart'), ['Suhu'], ['red']);
+    const humChart = createChart(document.getElementById('humChart'), ['Kelembaban'], ['blue']);
+    const accChart = createChart(document.getElementById('accChart'), ['X', 'Y', 'Z'], ['green', 'orange', 'purple']);
+    const gyroChart = createChart(document.getElementById('gyroChart'), ['X', 'Y', 'Z'], ['brown', 'magenta', 'cyan']);
+
+    const updateChart = (chart, dataArray) => {
+      const maxData = 30;
+      chart.data.labels.push('');
+      chart.data.datasets.forEach((dataset, i) => {
+        dataset.data.push(dataArray[i]);
+        if (dataset.data.length > maxData) dataset.data.shift();
+      });
+      if (chart.data.labels.length > maxData) chart.data.labels.shift();
+      chart.update();
+    };
+
+    const dataRef = db.ref("/sensorData");
+    dataRef.on("child_added", (snapshot) => {
+      const data = snapshot.val();
+
+      const lat = parseFloat(data.lat);
+      const lng = parseFloat(data.lng);
+      if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) return;
+
+      const latlng = [lat, lng];
+      pathCoordinates.push(latlng);
+      polyline.setLatLngs(pathCoordinates);
+
+      const popupContent = `
+        <b>Waktu:</b> ${data.time}<br/>
+        <b>Latitude:</b> ${lat.toFixed(6)}<br/>
+        <b>Longitude:</b> ${lng.toFixed(6)}<br/>
+        <b>Kecepatan:</b> ${data.speed} km/h<br/>
+        <b>Arah:</b> ${data.course}°<br/>
+        <b>Suhu:</b> ${data.suhu}°C<br/>
+        <b>Kelembaban:</b> ${data.kelembaban}%<br/>
+        <b>Accel:</b> X=${data.accX}, Y=${data.accY}, Z=${data.accZ}<br/>
+        <b>Gyro:</b> X=${data.gyroX}, Y=${data.gyroY}, Z=${data.gyroZ}
+      `;
+
+      const marker = L.marker(latlng).addTo(map);
+      marker.bindPopup(popupContent);
+      markers.push(marker);
+      map.setView(latlng, 15);
+
+      updateChart(tempChart, [data.suhu]);
+      updateChart(humChart, [data.kelembaban]);
+      updateChart(accChart, [data.accX, data.accY, data.accZ]);
+      updateChart(gyroChart, [data.gyroX, data.gyroY, data.gyroZ]);
+    });
+  </script>
+</body>
+</html>
